@@ -116,3 +116,5 @@ pip install torch librosa soundfile numpy scikit-learn tqdm matplotlib
 - Livingstone SR, Russo FA (2018) — RAVDESS · [PLoS ONE](https://doi.org/10.1371/journal.pone.0196391)
 - Hochreiter & Schmidhuber (1997) — Long Short-Term Memory
 - Cho et al. (2014) — Learning Phrase Representations using RNN Encoder-Decoder
+- Fayek H (2016) — Speech Processing for Machine Learning · [haythamfayek.com](https://haythamfayek.com/2016/04/21/speech-processing-for-machine-learning.html)
+- Practical Cryptography — Guide to Mel Frequency Cepstral Coefficients · [practicalcryptography.com](http://practicalcryptography.com/miscellaneous/machine-learning/guide-mel-frequency-cepstral-coefficients-mfccs/)
