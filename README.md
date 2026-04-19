@@ -49,28 +49,34 @@ Features averaged over time into a flat 122-dim vector. No temporal context.
 
 | | Value |
 |---|---|
-| Val accuracy | ~32% |
+| Val accuracy | 32% |
 | Angry F1 | 0.65 |
 | Disgust F1 | 0.05 |
 | Optimizer | Adam |
 | Dropout | 0.3 |
 
-Angry and calm are reasonably separable from static features. Disgust collapses entirely, its acoustic signature requires temporal context to distinguish from similar emotions.
+Angry and calm are reasonably separable from static features. Disgust collapses entirely — its acoustic signature requires temporal context to distinguish from similar emotions.
 
 ---
 
 ### CNN
 
-1D convolutions over the MFCC time axis. Learns local spectral-temporal patterns without modeling the full sequence.
+1D convolutions over the MFCC time axis. Learns local spectral-temporal patterns without modeling the full sequence. Only MFCC and RMS used as input channels — deltas are dropped since the conv filters learn temporal derivatives implicitly.
 
 ```
-(82, T) -> Conv1d blocks x3 -> Flatten -> Linear -> 8
+(41, T) -> Conv1d blocks x3 -> Global Average Pooling -> Linear -> 8
 ```
 
 | | Value |
 |---|---|
-| Val accuracy | TBD |
-| Optimizer | TBD |
+| Val accuracy | 28% |
+| Angry F1 | 0.61 |
+| Best epoch | 3 |
+| Optimizer | Adam |
+| Dropout | 0.5 |
+| Weight decay | 1e-4 |
+
+The CNN underperformed the MLP on this dataset. The model overfitted severely — best weights were saved at epoch 3 out of 100, after which validation loss diverged continuously. With only ~960 training samples and a speaker-independent split, the conv filters did not have enough data to learn generalizable temporal patterns. Angry remained the most separable class across all models.
 
 ---
 
@@ -79,7 +85,7 @@ Angry and calm are reasonably separable from static features. Disgust collapses 
 Recurrent architecture. Processes MFCCs frame by frame, maintaining a hidden state across the full utterance.
 
 ```
-(82, T) -> GRU(hidden=128, layers=2) -> final hidden state -> Linear -> 8
+(41, T) -> GRU(hidden=128, layers=2) -> final hidden state -> Linear -> 8
 ```
 
 | | Value |
@@ -95,9 +101,9 @@ Recurrent architecture. Processes MFCCs frame by frame, maintaining a hidden sta
 .
 ├── feature_extraction.py          # Extract features from .wav, save .npz
 ├── data_loader.py                 # Load .npz files into records / tensors
-├── train_mlp.py                   # MLP training and evaluation
-├── train_cnn.py                   # CNN training and evaluation (TBD)
-├── train_lstm.py                  # LSTM/GRU training and evaluation (TBD)
+├── train_mlp.ipynb                # MLP training and evaluation
+├── train_cnn.ipynb                # CNN training and evaluation
+├── train_lstm.ipynb               # LSTM/GRU training and evaluation (TBD)
 └── speech_emotion_features.ipynb  # Feature visualization and exploration
 ```
 
