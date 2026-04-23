@@ -5,7 +5,7 @@ import numpy as np
 import glob
 import os
 from tqdm import tqdm
-from data_loader import load_features
+from data_loader import prepare_data
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
@@ -52,76 +52,15 @@ EMOTION_MAP = {
 dataset_path = "Audio_Speech_Actors_01-24"
 feature_files = glob.glob(os.path.join(dataset_path, "Actor_*", "*.npz"))
 
-# Load data
-records = load_features(feature_files,flatten=True,return_gender = False)
-
-# Train/validation/test split
-# We will seperate test dataset by actors to avoid leakage
-# Test set
- 
-TEST_ACTORS = {21,22,23,24} # Hardcoding test set to avoid touching it during training
-test_data = [r for r in records if r['actor_id'] in TEST_ACTORS]
-x_test = np.array([r['features'] for r in test_data])
-y_test = np.array([r['label'] for r in test_data])
-
-# Train/valid set
-train_valid_data = [r for r in records if r['actor_id'] not in TEST_ACTORS]
-
-# Train/val split
-# We'll start by defining a male set and female set so we'll have an equal split between train and val
-uniq_actor_id = np.unique([r['actor_id'] for r in train_valid_data])
-np.random.seed(6283)
-
-male_set = [a for a in uniq_actor_id if a%2 == 1]
-female_set = [a for a in uniq_actor_id if a%2 == 0]
-
-# Shuffle
-np.random.shuffle(male_set)
-np.random.shuffle(female_set)
-
-# Set
-val_actors = set(male_set[:2] + female_set[:2]) # 2M + 2F actors
-train_actors = set(male_set[2:]+female_set[2:]) # 8M + 8F actors
-
-train_data = [a for a in train_valid_data if a['actor_id'] not in val_actors]
-x_train = np.array([r['features'] for r in train_data])
-y_train = np.array([r['label'] for r in train_data])
-
-val_data = [a for a in train_valid_data if a['actor_id'] in val_actors]
-x_val = np.array([r['features'] for r in val_data])
-y_val = np.array([r['label'] for r in val_data])
-
-
-# Normalize the data
-# Define standard normalization (sklearn does it better. but still ☻☺☻)
-def fit_normalizer(X):
-    mean = X.mean(axis = 0)
-    std = X.std(axis=0)
-    return mean,std
-def normalize(X,mean,std):
-    return (X-mean)/(std+1e-8)
-
-# Normalize
-# Fit - We normalize using train data to avoid leakage
-
-train_mean, train_std = fit_normalizer(x_train)
-
-x_train_norm = normalize(x_train,train_mean,train_std)
-x_val_norm = normalize(x_val,train_mean,train_std)
-x_test_norm = normalize(x_test,train_mean,train_std)
-
-# To torch tensors
-# Test
-x_test_torch = torch.tensor(x_test_norm, dtype=torch.float32)
-y_test_torch = torch.tensor(y_test, dtype=torch.long)
-
-# valid
-x_val_torch = torch.tensor(x_val_norm,dtype=torch.float32)
-y_val_torch = torch.tensor(y_val,dtype=torch.long)
-
-# Train
-x_train_torch = torch.tensor(x_train_norm,dtype=torch.float32)
-y_train_torch = torch.tensor(y_train,dtype=torch.long)
+# Load, split, normalize and convert to tensors
+x_train_torch, y_train_torch, x_val_torch, y_val_torch, x_test_torch, y_test_torch = prepare_data(
+    feature_files,
+    flatten=True,
+    features=['mfcc', 'delta', 'delta2', 'zcr', 'rms'],
+    test_actors={21, 22, 23, 24},
+    val_per_gender=2,
+    seed=6283
+)
 
 # Batching
 train_dataset = TensorDataset(x_train_torch, y_train_torch)
@@ -179,5 +118,5 @@ with torch.no_grad():
 
 print(classification_report(all_labels, all_preds, target_names=list(EMOTION_MAP.values())))
 print(f'Accuracy of the network on validation dataset: {100 * correct / total:.2f} %')
-print("Val label distribution:", np.bincount(y_val))
-print("Train label distribution:", np.bincount(y_train))
+print("Val label distribution:", np.bincount(y_val_torch.numpy()))
+print("Train label distribution:", np.bincount(y_train_torch.numpy()))

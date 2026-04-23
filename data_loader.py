@@ -1,11 +1,15 @@
 import numpy as np
 import glob
 import os
+import torch
 from tqdm import tqdm
-# Insert to loop
+
+ALL_FEATURES = ['mfcc', 'delta', 'delta2', 'zcr', 'rms']
 
 
-def load_features(feature_files,flatten,return_gender):
+def load_features(feature_files, flatten, return_gender, features=None):
+    if features is None:
+        features = ALL_FEATURES
 
     records = []
 
@@ -13,53 +17,145 @@ def load_features(feature_files,flatten,return_gender):
         filename = os.path.basename(filepath)
         parts = filename.replace('.npz', '').split('-')
 
-        emotion_code = parts[2] # 01-08 (see EMOTION_MAP)
-
-        actor_id = int(parts[6]) # 01-24
+        emotion_code = parts[2]
+        actor_id = int(parts[6])
 
         data = np.load(filepath)
 
-        # Feature vector building
-        if flatten:
-            # Mean over windows of features (We classify full samples)
-            mfcc = data['mfcc'].mean(axis=1)      #(40,)
-            delta = data['delta'].mean(axis=1)    # (40,)
-            delta2 = data['delta2'].mean(axis=1)  # (40,)
-            zcr = data['zcr'].mean(axis=1)        # (1,)
-            rms = data['rms'].mean(axis=1)        # (1,)
-
-        else:
-            # Features for each window (keep temporal info)
-            mfcc = data['mfcc']      # (40, W)
-            delta = data['delta']    # (40, W)
-            delta2 = data['delta2']  # (40, W)
-            zcr = data['zcr']        # (1,  W)
-            rms = data['rms']        # (1,  W)
-
-        feature_vector = np.concatenate([mfcc, delta, delta2, zcr, rms], axis=0)
+        record = {
+            'label': int(emotion_code) - 1,
+            'actor_id': actor_id,
+        }
 
         if return_gender:
-            records.append({
-                'features':feature_vector,
-                'label':int(emotion_code)-1, # CrossEntropyLoss (pytorch) expects [0-N-1] labels
-                'actor_id': actor_id,
-                'gender':actor_id%2 # 1:male 0:female
-                })
+            record['gender'] = actor_id % 2
 
-        else:
-            records.append({
-                'features':feature_vector,
-                'label':int(emotion_code)-1, # CrossEntropyLoss (pytorch) expects [0-N-1] labels
-                'actor_id': actor_id
-            })
+        for feat in features:
+            record[feat] = data[feat]
+
+        records.append(record)
 
     return records
 
 
+def fit_normalizer(X):
+    return X.mean(axis=0), X.std(axis=0)
 
 
+def normalize(X, mean, std):
+    return (X - mean) / (std + 1e-8)
 
 
+def pad_or_truncate(x, max_len):
+    W = x.shape[-1]
+    if W >= max_len:
+        return x[..., :max_len]
+    pad_width = [(0, 0)] * (x.ndim - 1) + [(0, max_len - W)]
+    return np.pad(x, pad_width)
 
 
-        
+def apply_cmvn(records, feature_keys, train_actor_ids):
+    for key in feature_keys:
+        actor_frames = {}
+        for r in records:
+            if r['actor_id'] not in train_actor_ids:
+                continue
+            aid = r['actor_id']
+            if aid not in actor_frames:
+                actor_frames[aid] = []
+            actor_frames[aid].append(r[key])
+
+        actor_stats = {}
+        for aid, clips in actor_frames.items():
+            all_frames = np.concatenate(clips, axis=-1)
+            actor_stats[aid] = {
+                'mean': all_frames.mean(axis=-1, keepdims=True),
+                'std':  all_frames.std(axis=-1, keepdims=True)
+            }
+
+        global_mean = np.mean([s['mean'] for s in actor_stats.values()], axis=0)
+        global_std  = np.mean([s['std']  for s in actor_stats.values()], axis=0)
+
+        for r in records:
+            aid = r['actor_id']
+            mean = actor_stats[aid]['mean'] if aid in actor_stats else global_mean
+            std  = actor_stats[aid]['std']  if aid in actor_stats else global_std
+            r[key] = (r[key] - mean) / (std + 1e-8)
+
+    return records
+
+
+def prepare_data(feature_files, flatten=True, features=None, return_gender=False,
+                 test_actors=None, val_per_gender=2, seed=6283, max_len=None,
+                 apply_cmvn_flag=False):
+
+    if not flatten and max_len is None:
+        raise ValueError("Set max_len before calling prepare_data with flatten=False.")
+
+    if test_actors is None:
+        test_actors = {21, 22, 23, 24}
+
+    if features is None:
+        features = ALL_FEATURES
+
+    records = load_features(feature_files, flatten=False,
+                            return_gender=return_gender, features=features)
+
+    # compute splits before CMVN so train_actors is known
+    uniq_actor_id = np.unique([r['actor_id'] for r in records
+                                if r['actor_id'] not in test_actors])
+    np.random.seed(seed)
+
+    male_set   = [a for a in uniq_actor_id if a % 2 == 1]
+    female_set = [a for a in uniq_actor_id if a % 2 == 0]
+    np.random.shuffle(male_set)
+    np.random.shuffle(female_set)
+
+    val_actors   = set(male_set[:val_per_gender] + female_set[:val_per_gender])
+    train_actors = set(a for a in uniq_actor_id if a not in val_actors)
+
+    # apply CMVN per feature before anything else
+    if apply_cmvn_flag:
+        records = apply_cmvn(records, features, train_actors)
+
+    # pad or truncate each feature to max_len, then concatenate into single vector
+    for r in records:
+        arrays = []
+        for feat in features:
+            arr = r[feat]
+            if not flatten:
+                arr = pad_or_truncate(arr, max_len)
+            else:
+                # mean over time axis for flat vector
+                arr = arr.mean(axis=-1)
+            arrays.append(arr)
+        r['features'] = np.concatenate(arrays, axis=0)
+
+    # split
+    test_data      = [r for r in records if r['actor_id'] in test_actors]
+    train_val_data = [r for r in records if r['actor_id'] not in test_actors]
+    train_data     = [r for r in train_val_data if r['actor_id'] not in val_actors]
+    val_data       = [r for r in train_val_data if r['actor_id'] in val_actors]
+
+    x_train = np.array([r['features'] for r in train_data])
+    y_train = np.array([r['label']    for r in train_data])
+    x_val   = np.array([r['features'] for r in val_data])
+    y_val   = np.array([r['label']    for r in val_data])
+    x_test  = np.array([r['features'] for r in test_data])
+    y_test  = np.array([r['label']    for r in test_data])
+
+    # global normalization only when CMVN is not used
+    if not apply_cmvn_flag:
+        train_mean, train_std = fit_normalizer(x_train)
+        x_train = normalize(x_train, train_mean, train_std)
+        x_val   = normalize(x_val,   train_mean, train_std)
+        x_test  = normalize(x_test,  train_mean, train_std)
+
+    x_train_torch = torch.tensor(x_train, dtype=torch.float32)
+    y_train_torch = torch.tensor(y_train, dtype=torch.long)
+    x_val_torch   = torch.tensor(x_val,   dtype=torch.float32)
+    y_val_torch   = torch.tensor(y_val,   dtype=torch.long)
+    x_test_torch  = torch.tensor(x_test,  dtype=torch.float32)
+    y_test_torch  = torch.tensor(y_test,  dtype=torch.long)
+
+    return x_train_torch, y_train_torch, x_val_torch, y_val_torch, x_test_torch, y_test_torch

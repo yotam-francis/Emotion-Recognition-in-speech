@@ -54,7 +54,7 @@ max_len = 300
  x_test_torch,
  y_test_torch] = prepare_data(feature_files=feature_files,
                             flatten=False, # Keep temporal info
-                            features=['mfcc','rms'], # Feature selection
+                            features=['mfcc','rms','zcr'], # Feature selection
                             max_len=max_len # Maximum length of data selected - all data will be padded/turnicated to it
                             )
 
@@ -62,7 +62,7 @@ max_len = 300
 class CNN(nn.Module):
     def __init__(self,dropout_rate = 0.5):
         super().__init__()
-        self.conv1 = nn.Conv1d(in_channels=41,out_channels=32,kernel_size=5) # conv layer returns T - (kernel size - 1)
+        self.conv1 = nn.Conv1d(in_channels=42,out_channels=32,kernel_size=5) # conv layer returns T - (kernel size - 1)
         self.pool = nn.MaxPool1d(2,2) # Max pooling keeps max value in a 2 window with 2 stride (halves the size)
         self.conv2 = nn.Conv1d(in_channels=32,out_channels=64,kernel_size=5)
         self.conv3 = nn.Conv1d(in_channels=64,out_channels=128,kernel_size=5)
