@@ -19,12 +19,13 @@ def load_features(feature_files, flatten, return_gender, features=None):
 
         emotion_code = parts[2]
         actor_id = int(parts[6])
-
+        is_augmented = int(parts[7])
         data = np.load(filepath)
 
         record = {
             'label': int(emotion_code) - 1,
             'actor_id': actor_id,
+            'is_augmented': is_augmented # 1 is augmented, 0 is not
         }
 
         if return_gender:
@@ -108,6 +109,7 @@ def prepare_data(feature_files, flatten=True, features=None, return_gender=False
 
     male_set   = [a for a in uniq_actor_id if a % 2 == 1]
     female_set = [a for a in uniq_actor_id if a % 2 == 0]
+
     np.random.shuffle(male_set)
     np.random.shuffle(female_set)
 
@@ -131,11 +133,11 @@ def prepare_data(feature_files, flatten=True, features=None, return_gender=False
             arrays.append(arr)
         r['features'] = np.concatenate(arrays, axis=0)
 
-    # split
-    test_data      = [r for r in records if r['actor_id'] in test_actors]
+    # split — val/test use only original (non-augmented) recordings
+    test_data      = [r for r in records if r['actor_id'] in test_actors and r['is_augmented'] == 0]
     train_val_data = [r for r in records if r['actor_id'] not in test_actors]
     train_data     = [r for r in train_val_data if r['actor_id'] not in val_actors]
-    val_data       = [r for r in train_val_data if r['actor_id'] in val_actors]
+    val_data       = [r for r in train_val_data if r['actor_id'] in val_actors and r['is_augmented'] == 0]
 
     x_train = np.array([r['features'] for r in train_data])
     y_train = np.array([r['label']    for r in train_data])

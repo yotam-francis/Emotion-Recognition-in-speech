@@ -9,14 +9,14 @@ from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report
 from data_loader import prepare_data
-
+import pyroomacoustics as pra
 
 # Config 
 DATASET_PATH = "Audio_Speech_Actors_01-24"
 MAX_LEN      = 300
 BATCH_SIZE   = 32
 N_EPOCHS     = 70
-LR           = 0.001
+LR           = 1e-4
 DROPOUT      = 0.3
 PATIENCE     = 30
 
@@ -47,6 +47,18 @@ print(x_train_torch.shape)
 train_loader = DataLoader(TensorDataset(x_train_torch, y_train_torch), batch_size=BATCH_SIZE, shuffle=True)
 val_loader   = DataLoader(TensorDataset(x_val_torch,   y_val_torch),   batch_size=BATCH_SIZE, shuffle=False)
 
+class FocalLoss(nn.Module):
+    def __init__(self,gamma=0.2,weight = None):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+    def forward(self,logits,labels):
+        n_classes = logits.size(1)
+        eps = 0.1
+        ce = F.cross_entropy(logits,labels,weight=self.weight,label_smoothing=eps,reduction="none")
+        pt = torch.exp(-ce)
+        return ((1-pt)**self.gamma*ce).mean()
+    
 class TDcnn(nn.Module):
     def __init__(self, num_classes=8, dropout=DROPOUT):
         super().__init__()
@@ -111,8 +123,10 @@ class TDcnn(nn.Module):
         return x
     
 # Training loop
+class_weights = torch.ones(8)
+class_weights[0] = 2.0  # neutral is label 0
+criterion = FocalLoss(gamma=2.0, weight=class_weights)
 model     = TDcnn(dropout=DROPOUT)
-criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=LR)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5,patience=5)
 

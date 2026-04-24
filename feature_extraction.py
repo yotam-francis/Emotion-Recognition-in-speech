@@ -12,6 +12,7 @@ from tqdm import tqdm
 # RAVDESS filename encoding:
 # Modality - VocalChannel - Emotion - Intensity - Statement - Repetition - Actor
 # Emotion codes:
+
 EMOTION_MAP = {
     '01': 'neutral',
     '02': 'calm',
@@ -60,67 +61,47 @@ for filepath in tqdm(audio_files, desc="Extracting features"):
     # Load audio
     audio, sr = librosa.load(filepath, sr=None)
 
-    all_versions = [audio] + augment_audio(audio, sr) # Artifical samples
+    all_versions = [audio] + augment_audio(audio, sr)
     alpha = 0.97
 
-    for i, sig in enumerate(all_versions):
-        peAudio = preEmphasisFilt(sig, alpha=alpha)
-        # ... extract features exactly as before ...
-        
-        # save with augmentation suffix
-        suffix = '' if i == 0 else f'_aug{i}'
-        output_path = filepath.replace('.wav', f'{suffix}.npz')
-        np.savez(output_path, **feat_dict)
-    # processing 
-
-    # Pre emphasis
-
-
-    # Features
-    # MFCC
-    mfcc = librosa.feature.mfcc(y=peAudio,sr=sr,n_mfcc=40,n_fft = 2048, win_length = win_len, hop_length = win_hop)
-    mfcc = (mfcc - mfcc.mean(axis=1, keepdims=True)) / (mfcc.std(axis=1, keepdims=True) + 1e-8) # Normalize
-    # Deltas
-    delta = librosa.feature.delta(mfcc)
-    delta2 = librosa.feature.delta(mfcc, order = 2)
-
-    # ZCR
-    zcr = librosa.feature.zero_crossing_rate(y=peAudio,frame_length = win_len, hop_length = win_hop)
-
-    # RMS
-    rms = librosa.feature.rms(y=peAudio,frame_length = win_len,hop_length = win_hop)
-
-    # Mel spectrogram
-    mel = librosa.feature.melspectrogram(y=peAudio ,sr=sr, n_mels = 64, hop_length=win_hop,win_length=win_len)
-    mel_db = librosa.power_to_db(mel, ref=np.max)  # convert to dB scale
-    delta_mel  = librosa.feature.delta(mel_db)
-    delta2_mel = librosa.feature.delta(mel_db, order=2)
-    # normalize per clip
-    mel_db = (mel_db - mel_db.mean()) / (mel_db.std() + 1e-8) 
-    # normalize each channel independently
     def norm(x):
         return (x - x.mean()) / (x.std() + 1e-8)
 
-    mel_3ch = np.stack([norm(mel_db), norm(delta_mel), norm(delta2_mel)], axis=0)  # (3, 64, T)  
-    zcr = norm(zcr)
-    rms = norm(rms)
+    for i, sig in enumerate(all_versions):
+        peAudio = preEmphasisFilt(sig, alpha=alpha)
 
-    # Put features into dict for easy loading
+        mfcc = librosa.feature.mfcc(y=peAudio, sr=sr, n_mfcc=40, n_fft=2048, win_length=win_len, hop_length=win_hop)
+        mfcc = (mfcc - mfcc.mean(axis=1, keepdims=True)) / (mfcc.std(axis=1, keepdims=True) + 1e-8)
+        delta = librosa.feature.delta(mfcc)
+        delta2 = librosa.feature.delta(mfcc, order=2)
 
-    feat_dict = {
-        "actor_id": actor_id,       # Actor ID
-        "gender": actor_id % 2,     # Gender (1: male, 0: female)
-        "emotion": emotion_code,    # Numerized emotion (see EMOTION_MAP)
-        "mfcc": mfcc,               # MFCC matrix [40, Window number]
-        "delta": delta,             # delta matrix [40, Window number]
-        "delta2": delta2,           # delta-delta matrix [40, Window number]
-        "zcr": zcr,                 # ZCR vector [1, Window number]
-        "rms": rms,                 # RMS vector [1, Window number]
-        "mel3ch": mel_3ch           # Mel spectrogram and its deltas [3, 128, ,Window number]
-    }
+        zcr = librosa.feature.zero_crossing_rate(y=peAudio, frame_length=win_len, hop_length=win_hop)
+        rms = librosa.feature.rms(y=peAudio, frame_length=win_len, hop_length=win_hop)
 
-    output_path = filepath.replace('.wav', '.npz')
-    np.savez(output_path, **feat_dict)
+        mel = librosa.feature.melspectrogram(y=peAudio, sr=sr, n_mels=64, hop_length=win_hop, win_length=win_len)
+        mel_db = librosa.power_to_db(mel, ref=np.max)
+        delta_mel = librosa.feature.delta(mel_db)
+        delta2_mel = librosa.feature.delta(mel_db, order=2)
+        mel_3ch = np.stack([norm(mel_db), norm(delta_mel), norm(delta2_mel)], axis=0)  # (3, 64, T)
+
+        zcr = norm(zcr)
+        rms = norm(rms)
+
+        feat_dict = {
+            "actor_id": actor_id,
+            "gender": actor_id % 2,
+            "emotion": emotion_code,
+            "mfcc": mfcc,
+            "delta": delta,
+            "delta2": delta2,
+            "zcr": zcr,
+            "rms": rms,
+            "mel3ch": mel_3ch,
+        }
+
+        suffix = f'-{i}'  # -0 original, -1 to -4 augmented
+        output_path = filepath.replace('.wav', f'{suffix}.npz')
+        np.savez(output_path, **feat_dict)
 
 
 
